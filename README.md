@@ -1,155 +1,170 @@
-# E-commerce SOLID — Projeto 2
+# E-commerce — Projeto 3
 
-## Estrutura de Diretórios
+API de e-commerce em Node.js, TypeScript e Express, organizada em camadas e com injeção de dependências (InversifyJS). Neste projeto, a aplicação e o banco rodam em containers com Docker Compose, o banco é o **PostgreSQL** e há uma rota nova, `GET /orders/:id`.
 
-* `src/container/`: Container de IoC (InversifyJS). `types.ts` define os símbolos de injeção e `container.ts` é o único lugar que conhece as classes concretas; ele escolhe as implementações conforme o `APP_ENV`.
-* `src/controllers/`: Camada HTTP. O `OrderController` recebe a requisição, chama o `OrderService` e devolve a resposta.
-* `src/domain/`: Regras de negócio puras: produtos (`PhysicalProduct`, `DigitalProduct`), `ProductFactory` e `BusinessError`.
-* `src/services/`: `OrderService` (fluxo do pedido) e `NotificationService` (monta o e-mail de confirmação).
-* `src/providers/`: Ferramentas externas. `IMailProvider`, `EtherealMailProvider` (modo dev, Nodemailer) e `ConsoleMailProvider` (modo test, imprime o e-mail no console).
-* `src/repositories/`: Acesso a dados. Interfaces, implementações com Prisma (modo dev) e `InMemoryOrderRepository` (modo test, pedidos em memória).
-* `src/payments/`: Formas de pagamento (crédito, débito e Pix) e o `PaymentMethodRegistry`.
-* `src/lib/logger.ts`: Utilitário de log (Winston - procure mais sobre ele, é muito util em projetos reais).
-* `src/app.ts` & `src/server.ts`: Configuração do Express (a rota pega o controller pronto do container) e inicialização do servidor.
-* `prisma/`: Configuração do banco de dados SQLite e script de seed.
-* `prisma/seed.ts`: Popula o banco com dados iniciais.
-* `.env.example`: Modelo do arquivo `.env`, com a variável `APP_ENV`.
+## Como rodar
 
-## Como Rodar
+Requisitos: **Docker** e **Docker Compose** (com o Docker Desktop aberto, no Windows).
 
-Siga os passos abaixo (na raiz do projeto) para preparar o ambiente:
+1. Crie o arquivo `.env` a partir do modelo:
+   ```bash
+   cp .env.example .env
+   ```
+   No PowerShell, use `Copy-Item .env.example .env`.
 
-1.  **Instale as dependências:**
-    ```bash
-    npm install
-    ```
+2. Suba tudo (API e banco):
+   ```bash
+   docker compose up --build
+   ```
+   Na primeira vez, o build leva alguns minutos. A API está pronta quando o log mostrar `Server rodando em http://localhost:3000`.
 
-2.  **Gerar o Prisma Client:**
-    ```bash
-    npx prisma generate
-    ```
+3. Para parar:
+   ```bash
+   docker compose down
+   ```
+   Os dados ficam guardados no volume `dados-banco`, então `docker compose down` e `docker compose up` de novo **não apagam os pedidos**. Para apagar também os dados, use `docker compose down -v`.
 
-3.  **Criar o banco de dados (SQLite) e as tabelas:**
-    ```bash
-    npm run prisma:migrate
-    ```
+### Observações
 
-4.  **Popular o banco com dados de teste:**
-    ```bash
-    npm run prisma:seed
-    ```
+- O PostgreSQL **não publica porta** no host. Só a API (porta 3000) é acessível de fora; ela conversa com o banco pela rede interna do Compose, usando o serviço `banco`.
+- A API só inicia depois que o banco estiver pronto (`healthcheck` + `depends_on`).
+- Como o `DATABASE_URL` aponta para o serviço `banco`, o projeto deve ser executado pelo Docker Compose. Rodar `npm run dev` direto na máquina exige um PostgreSQL local e um `DATABASE_URL` com `localhost`.
 
-5.  **Criar o arquivo `.env` a partir do modelo:**
-    ```bash
-    cp .env.example .env
-    ```
-    No PowerShell ou cmd, use `copy .env.example .env`.
+## Rotas
 
-6.  **(Opcional) Confirmar que o projeto compila sem erros:**
-    ```bash
-    npx tsc --noEmit
-    ```
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| POST | `/orders` | Cria um pedido |
+| GET | `/orders/:id` | Devolve o pedido com o `id` informado |
 
-## Modos de Execução (APP_ENV)
+Respostas de `GET /orders/:id`:
 
-O modo é escolhido pela variável `APP_ENV` no arquivo `.env`. As classes são trocadas apenas no `src/container/container.ts`, sem alterar services nem controllers.
+- **200**: o pedido (`id`, `customer`, `items`, `total`, `status`, `createdAt`).
+- **404**: o pedido não existe.
+- **400**: o `id` não é um número inteiro.
+
+## Como testar
+
+Com a API rodando, use os comandos abaixo. Os produtos cadastrados são o ID 1 (livro físico, com frete de R$ 10,00) e o ID 2 (e-book, sem frete).
+
+### Criar um pedido
+
+Linux, Mac ou Git Bash:
+
+```bash
+curl -X POST http://localhost:3000/orders \
+  -H "Content-Type: application/json" \
+  -d '{"customer":"cliente@ethereal.email","items":[{"productId":1,"quantity":1}],"paymentMethod":"pix"}'
+```
+
+PowerShell:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:3000/orders -ContentType "application/json" -Body '{"customer":"cliente@ethereal.email","items":[{"productId":1,"quantity":1}],"paymentMethod":"pix"}'
+```
+
+A resposta traz o `orderId` e, em `emailPreview`, um link do Ethereal com o e-mail de confirmação.
+
+Exemplo com cartão de crédito:
+
+```bash
+curl -X POST http://localhost:3000/orders \
+  -H "Content-Type: application/json" \
+  -d '{"customer":"cliente@ethereal.email","items":[{"productId":2,"quantity":1}],"paymentMethod":"credit_card","paymentDetails":{"cardNumber":"1234567812345678","cvv":"123"}}'
+```
+
+### Buscar um pedido
+
+Use o `orderId` devolvido na criação:
+
+```bash
+curl -i http://localhost:3000/orders/1
+```
+
+Um `id` que não existe devolve 404:
+
+```bash
+curl -i http://localhost:3000/orders/999
+```
+
+No PowerShell, use `curl.exe` (sem o alias do `Invoke-WebRequest`) para os comandos `GET` com `-i`.
+
+### Testar a persistência
+
+1. Crie um pedido e anote o `orderId`.
+2. Rode `docker compose down` e depois `docker compose up`.
+3. Busque o mesmo pedido com `GET /orders/<id>`: ele continua lá.
+
+## Modos de execução (APP_ENV)
+
+O modo é escolhido pela variável `APP_ENV` no `.env`. As classes são trocadas apenas no `src/container/container.ts`, sem alterar services nem controllers.
 
 | APP_ENV | E-mail | Pedidos |
 |---------|--------|---------|
-| `dev`   | Ethereal (envio de teste real, precisa de internet) | Banco SQLite via Prisma |
-| `test`  | Impresso no console do servidor | Guardados em memória (array), somem ao reiniciar; não precisa de internet |
+| `dev`   | Ethereal (envio de teste real, precisa de internet) | Salvos no PostgreSQL via Prisma |
+| `test`  | Impresso no console do servidor | Guardados em memória, somem ao reiniciar |
 
-Para trocar de modo, mude só o `APP_ENV` no `.env` e **reinicie o servidor**, pois a variável é lida uma única vez na inicialização.
+Para trocar de modo, mude o `APP_ENV` no `.env`, rode `docker compose down` e suba de novo, pois a variável é lida uma vez na inicialização. A rota `GET /orders/:id` funciona nos dois modos. No modo `test`, os produtos ainda vêm do banco.
 
-## Execução
+## Arquitetura em camadas
 
-Para rodar a API em modo de desenvolvimento (reinicia ao salvar arquivos):
-
-```bash
-npm run dev
+```
+OrderController  ->  OrderService  ->  IOrderRepository
+   (HTTP)             (regras)          (Prisma ou memória)
 ```
 
-O servidor iniciará em `http://localhost:3000`.
-*Nota: No modo `dev`, a primeira execução pode demorar alguns segundos para gerar as credenciais de teste do Ethereal Mail.*
+- **Controller:** só trata HTTP. Lê os dados da requisição e devolve o status e o JSON. Nunca acessa um repositório nem o Prisma.
+- **Service:** contém a regra de negócio. Por exemplo, pedido inexistente é um erro (`OrderNotFoundError`).
+- **Repositório:** busca e grava os dados. Há duas implementações da mesma interface: `PrismaOrderRepository` (modo `dev`) e `InMemoryOrderRepository` (modo `test`).
+- **Container:** `src/container/container.ts` é o único lugar que conhece as classes concretas.
 
-## Como Testar
+A troca do SQLite pelo PostgreSQL mudou só a infraestrutura (`schema.prisma`, `.env` e Docker). Nenhum arquivo de `services/` ou `controllers/` foi alterado por causa dessa troca.
 
-Utilize o **cURL** (terminal) ou ferramentas como **Postman/Insomnia** para enviar requisições POST.
-
-Você pode utilizar o gitbash para executar os comandos abaixo usando o cURL, ele parece estar funcionando muito bem (mas claro que o melhor seria utilizar Linux).
-
-Os mesmos cenários valem para os dois modos:
-
-* **`APP_ENV=dev`:** a resposta traz em `emailPreview` um link do Ethereal; abra no navegador para ver o e-mail.
-* **`APP_ENV=test`:** a resposta traz `e-mail impresso no console` em `emailPreview`; o e-mail aparece no terminal onde o servidor está rodando. Funciona com a internet desligada.
-
-### Cenário 1: Compra de Livro Físico (Com Frete)
-O sistema deve calcular R$ 10,00 de frete.
-
-```bash
-curl -X POST http://localhost:3000/orders \
--H "Content-Type: application/json" \
--d '{
-  "customer": "abacaxi123@ethereal.email",
-  "items": [{ "productId": 1, "quantity": 1 }],
-  "paymentMethod": "credit_card",
-  "paymentDetails": { "cardNumber": "1234567812345678", "cvv": "123" }
-}'
-```
-
-### Cenário 2: Compra de E-book (Digital)
-Produto digital (ID 2): não deve ter frete.
-
-```bash
-curl -X POST http://localhost:3000/orders \
--H "Content-Type: application/json" \
--d '{
-  "customer": "abacate123@ethereal.email",
-  "items": [{ "productId": 2, "quantity": 1 }],
-  "paymentMethod": "credit_card",
-  "paymentDetails": { "cardNumber": "1234567812345678", "cvv": "123" }
-}'
-```
-
-## Árvore de Arquivos (Pós-Refatoração)
+## Estrutura de arquivos
 
 ```text
 .
-├── .env.example                     # Modelo do .env (define APP_ENV=dev ou test)
-├── prisma/                          # Banco SQLite, migrations e seed
+├── Dockerfile                       # Imagem da API (Node 20)
+├── compose.yaml                     # Serviços: banco (PostgreSQL) e api
+├── .dockerignore
+├── .env.example                     # Modelo do .env (APP_ENV, credenciais e DATABASE_URL)
+├── prisma/
+│   ├── schema.prisma                # Modelos Product e Order (PostgreSQL)
+│   └── seed.ts                      # Cadastra os produtos iniciais
 └── src/
     ├── container/                   # Container de IoC (InversifyJS)
     │   ├── types.ts                   # Símbolos usados para injetar as dependências
-    │   └── container.ts               # Único lugar que conhece as classes concretas; escolhe dev ou test
+    │   └── container.ts               # Único lugar que conhece as classes concretas
     ├── controllers/                 # Camada HTTP
-    │   └── OrderController.ts         # Recebe a requisição e devolve a resposta HTTP
+    │   └── OrderController.ts         # processOrder (POST) e getOrder (GET)
     ├── domain/                      # Regras de negócio puras
     │   ├── BusinessError.ts           # Erro de regra de negócio (vira 400)
+    │   ├── OrderNotFoundError.ts      # Pedido não encontrado (vira 404)
     │   ├── IProduct.ts                # Contrato do produto
     │   ├── PhysicalProduct.ts         # Produto físico (frete R$ 10)
     │   ├── DigitalProduct.ts          # Produto digital (sem frete)
     │   └── ProductFactory.ts          # Cria o produto certo a partir do banco
-    ├── services/                    # Orquestração do fluxo do pedido
-    │   ├── OrderService.ts            # Fluxo do pedido: valida, paga, salva e notifica
+    ├── services/                    # Regras do fluxo do pedido
+    │   ├── OrderService.ts            # execute (cria o pedido) e findById (busca)
     │   └── NotificationService.ts     # Monta o e-mail de confirmação
     ├── providers/                   # Ferramentas externas (e-mail)
     │   ├── IMailProvider.ts           # Contrato de envio de e-mail
     │   ├── EtherealMailProvider.ts    # Modo dev: envio via Nodemailer (Ethereal)
-    │   └── ConsoleMailProvider.ts     # Modo test: imprime o e-mail no console (sem internet)
+    │   └── ConsoleMailProvider.ts     # Modo test: imprime o e-mail no console
     ├── repositories/                # Acesso a dados
-    │   ├── IOrderRepository.ts        # Contrato de pedidos
-    │   ├── PrismaOrderRepository.ts   # Modo dev: pedidos salvos com Prisma
-    │   ├── InMemoryOrderRepository.ts # Modo test: pedidos guardados em memória (array)
+    │   ├── IOrderRepository.ts        # Contrato de pedidos (create e findById)
+    │   ├── PrismaOrderRepository.ts   # Modo dev: pedidos no PostgreSQL com Prisma
+    │   ├── InMemoryOrderRepository.ts # Modo test: pedidos em memória
     │   ├── IProductRepository.ts      # Contrato de produtos
     │   └── PrismaProductRepository.ts # Produtos com Prisma
     ├── payments/                    # Formas de pagamento
-    │   ├── IPaymentMethod.ts          # Contrato de pagamento (inclui o name)
+    │   ├── IPaymentMethod.ts          # Contrato de pagamento
     │   ├── CreditCardPayment.ts       # Cartão de crédito
     │   ├── DebitCardPayment.ts        # Cartão de débito
     │   ├── PixPayment.ts              # Pix
-    │   └── PaymentMethodRegistry.ts   # Recebe todos os pagamentos (@multiInject) e escolhe pelo name
-    ├── lib/                         # Utilitários (logs)
+    │   └── PaymentMethodRegistry.ts   # Escolhe o pagamento pelo nome
+    ├── lib/
     │   └── logger.ts                  # Configuração do Winston
-    ├── app.ts                         # Express e rota; pega o controller pronto do container
-    └── server.ts                      # Carrega reflect-metadata/dotenv e inicia o servidor
+    ├── app.ts                         # Express e rotas
+    └── server.ts                      # Inicia o servidor
 ```

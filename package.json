@@ -5,8 +5,9 @@
   "main": "src/server.ts",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "start": "prisma db push && tsx prisma/seed.ts && tsx src/server.ts",
     "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev --name init",
+    "prisma:push": "prisma db push",
     "prisma:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {

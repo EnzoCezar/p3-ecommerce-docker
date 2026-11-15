@@ -10,4 +10,6 @@ const orderController = container.get<OrderController>(TYPES.OrderController);
 
 app.post('/orders', orderController.processOrder.bind(orderController));
 
+app.get('/orders/:id', orderController.getOrder.bind(orderController));
+
 export default app;

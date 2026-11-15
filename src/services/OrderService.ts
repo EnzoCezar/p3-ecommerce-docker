@@ -5,9 +5,10 @@ import { ProductFactory } from '../domain/ProductFactory';
 import logger from '../lib/logger';
 import { PaymentDetails } from '../payments/IPaymentMethod';
 import { PaymentMethodRegistry } from '../payments/PaymentMethodRegistry';
-import { IOrderRepository, OrderItemData } from '../repositories/IOrderRepository';
+import { IOrderRepository, Order, OrderItemData } from '../repositories/IOrderRepository';
 import { IProductRepository } from '../repositories/IProductRepository';
 import { NotificationService } from './NotificationService';
+import { OrderNotFoundError } from '../domain/OrderNotFoundError';
 
 export interface OrderItemInput {
   productId: number;
@@ -92,5 +93,14 @@ export class OrderService {
     logger.info(`Email enviado: ${emailPreview}`);
 
     return { orderId: order.id, emailPreview };
+  }
+
+  async findById(id: number): Promise<Order> {
+    const order = await this.orderRepository.findById(id);
+    if (order === null) {
+      throw new OrderNotFoundError(id);
+    }
+  
+    return order;
   }
 }
